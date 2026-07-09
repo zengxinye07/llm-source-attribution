@@ -1,0 +1,11 @@
+numpy
+pandas
+pyarrow
+scikit-learn
+scipy
+sentence-transformers
+spacy
+matplotlib
+jupyter
+nbformat
+# after install: python -m spacy download en_core_web_sm
