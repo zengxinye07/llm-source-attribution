@@ -92,7 +92,11 @@ MIN_TOKENS = 3  # drop texts with fewer than this many tokens (likely corrupted)
 # --------------------------------------------------------------------------- #
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
-DATA_RAW = DATA_DIR / "raid_raw.parquet"          # TODO: point at your RAID download
+# RAID's official test_none.csv has no label columns (id, generation only) --
+# it's the hidden-label leaderboard test set, unusable for our evaluation.
+# train_none.csv is the only labeled file we use; we carve our own train/val/test
+# out of it via make_splits(). extra_none.csv is intentionally unused.
+DATA_RAW = DATA_DIR / "train_none.csv"
 CLEAN_PARQUET = DATA_DIR / "clean.parquet"         # frozen output of preprocessing
 ARTIFACTS = ROOT / "artifacts"                      # cached features / embeddings / splits
 FIGURES = ROOT / "figures"                          # report-bound plots

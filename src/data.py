@@ -18,13 +18,14 @@ from .utils import cache_or_compute
 # Loading + preprocessing (proposal Section 3.1)
 # --------------------------------------------------------------------------- #
 def load_raw() -> pd.DataFrame:
-    """Load the raw RAID dump.
+    """Load the raw RAID dump (train_none.csv -- the only labeled RAID split;
+    test_none.csv has no label columns and extra_none.csv is unused, see config.py).
 
-    TODO: adjust to however you obtained RAID (parquet / csv / HF datasets).
-    Must return a dataframe with at least: text, model, domain, source_id,
-    attack, decoding, repetition_penalty.
+    Returns a dataframe with model, domain, source_id, attack, decoding,
+    repetition_penalty, and generation (renamed to text).
     """
-    return pd.read_parquet(config.DATA_RAW)
+    df = pd.read_csv(config.DATA_RAW)
+    return df.rename(columns={"generation": "text"})
 
 
 def preprocess(df: pd.DataFrame) -> pd.DataFrame:
