@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# large / regenerable
+data/*.parquet
+data/*.csv
+artifacts/*.pkl
+artifacts/*.json
+figures/*.png
+
+# but keep the folders
+!artifacts/.gitkeep
+!figures/.gitkeep
+
+# ignores
+.DS_Store
