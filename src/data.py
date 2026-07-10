@@ -93,7 +93,14 @@ def make_splits(df: pd.DataFrame) -> Dict[str, np.ndarray]:
 
     All texts sharing a source_id land in the SAME split (prompt-leakage control,
     proposal 3.3.1). Grouping takes precedence over the exact ratio; we stratify
-    the class distribution within that constraint.
+    within that constraint.
+
+    Stratification key is (model, domain) jointly, not model alone. Every
+    source_id group already contains exactly one row per class (12/12), so
+    class balance across folds is guaranteed by construction regardless of
+    how groups are assigned -- domain is the only thing that actually varies
+    group-to-group and needs deliberate stratification (proposal 3.3.7 needs
+    each split to be domain-balanced too, not just class-balanced).
 
     Two-stage StratifiedGroupKFold:
       Stage 1: carve out test (~1/7 = 14.3%) from everything.
@@ -106,7 +113,7 @@ def make_splits(df: pd.DataFrame) -> Dict[str, np.ndarray]:
     """
     from sklearn.model_selection import StratifiedGroupKFold
 
-    y = df[config.LABEL_COL].to_numpy()
+    y = (df[config.LABEL_COL].astype(str) + "|" + df[config.DOMAIN_COL].astype(str)).to_numpy()
     groups = df[config.GROUP_COL].to_numpy()
     pos = np.arange(len(df))
 

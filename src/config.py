@@ -49,7 +49,7 @@ DOMAINS = [
     "recipes",
     "reddit",
     "reviews",
-    "wikipedia",
+    "wiki",  # matches the RAID CSV's actual domain value, not "wikipedia"
 ]
 
 # --------------------------------------------------------------------------- #
