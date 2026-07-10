@@ -15,33 +15,53 @@ from . import config
 # --------------------------------------------------------------------------- #
 # Error analysis (proposal 3.3.5, RQ3)
 # --------------------------------------------------------------------------- #
+def _row_normalize(confusion: np.ndarray) -> np.ndarray:
+    conf = np.asarray(confusion, dtype=float)
+    row_sums = conf.sum(axis=1, keepdims=True)
+    return np.divide(conf, row_sums, out=np.zeros_like(conf), where=row_sums != 0)
+
+
 def pairwise_confusion_scores(confusion: np.ndarray, labels: list) -> pd.DataFrame:
     """Symmetric confusion score for every model pair.
 
     For each (i, j): average the two directional misclassification rates,
-    i.e. mean(P(pred=j | true=i), P(pred=i | true=j)). Return a tidy DataFrame
-    (model_a, model_b, score, same_family) sorted descending.
-
-    TODO: row-normalise the confusion matrix first (divide by row sums) so each
-    entry is a rate, then average the (i,j) and (j,i) rates. Tag same_family
-    using config.MODEL_FAMILIES for the within- vs cross-family comparison.
+    i.e. mean(P(pred=j | true=i), P(pred=i | true=j)). Returns a tidy DataFrame
+    (model_a, model_b, score, same_family), sorted descending by score.
     """
-    raise NotImplementedError
+    rate = _row_normalize(confusion)
+    rows = []
+    for i in range(len(labels)):
+        for j in range(i + 1, len(labels)):
+            rows.append({
+                "model_a": labels[i],
+                "model_b": labels[j],
+                "score": (rate[i, j] + rate[j, i]) / 2,
+                "same_family": config.MODEL_FAMILIES.get(labels[i]) == config.MODEL_FAMILIES.get(labels[j]),
+            })
+    return pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
 
 
 def cluster_confusion_rows(confusion: np.ndarray, labels: list):
     """Hierarchical clustering on confusion-matrix rows (each model's misclass
     distribution as a feature vector). Returns a linkage matrix for a dendrogram.
 
-    TODO: row-normalise -> scipy.cluster.hierarchy.linkage(..., method='ward').
     Compare resulting groupings against config.MODEL_FAMILIES.
     """
-    raise NotImplementedError
+    from scipy.cluster.hierarchy import linkage
+
+    return linkage(_row_normalize(confusion), method="ward")
 
 
 def within_vs_cross_family(pairwise_df: pd.DataFrame) -> Dict[str, float]:
     """Summarise mean confusion for within-family vs cross-family pairs (RQ3)."""
-    raise NotImplementedError
+    within = pairwise_df.loc[pairwise_df["same_family"], "score"]
+    cross = pairwise_df.loc[~pairwise_df["same_family"], "score"]
+    return {
+        "within_family_mean": float(within.mean()) if len(within) else float("nan"),
+        "cross_family_mean": float(cross.mean()) if len(cross) else float("nan"),
+        "within_family_n": int(len(within)),
+        "cross_family_n": int(len(cross)),
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -50,25 +70,35 @@ def within_vs_cross_family(pairwise_df: pd.DataFrame) -> Dict[str, float]:
 def class_centroids(embeddings: np.ndarray, y: np.ndarray, labels: list = None) -> Dict[str, np.ndarray]:
     """Mean SBERT embedding per source class. labels default = config.CLASSES."""
     labels = labels or list(config.CLASSES)
-    # TODO: for each label, embeddings[y == label].mean(axis=0).
-    raise NotImplementedError
+    return {label: embeddings[y == label].mean(axis=0) for label in labels}
 
 
 def centroid_cosine_matrix(centroids: Dict[str, np.ndarray]) -> pd.DataFrame:
-    """Pairwise cosine similarity between class centroids (proposal 3.3.6, RQ3).
+    """Pairwise cosine similarity between class centroids (proposal 3.3.6, RQ3)."""
+    from sklearn.metrics.pairwise import cosine_similarity
 
-    TODO: sklearn.metrics.pairwise.cosine_similarity on stacked centroids.
-    Return a labelled square DataFrame.
-    """
-    raise NotImplementedError
+    labels = list(centroids.keys())
+    mat = np.stack([centroids[l] for l in labels])
+    return pd.DataFrame(cosine_similarity(mat), index=labels, columns=labels)
 
 
 def ward_dendrogram_linkage(centroids: Dict[str, np.ndarray]):
-    """Ward linkage over centroid distances -> dendrogram input (RQ3).
+    """Ward linkage over centroid cosine distances -> dendrogram input (RQ3).
 
-    TODO: convert cosine sim to distance (1 - sim), condense, linkage(method='ward').
+    Converts similarity to distance (1 - sim), symmetrises away floating-point
+    noise, condenses, and runs Ward linkage. Leaf order matches
+    `list(centroids.keys())`.
     """
-    raise NotImplementedError
+    from scipy.cluster.hierarchy import linkage
+    from scipy.spatial.distance import squareform
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    labels = list(centroids.keys())
+    mat = np.stack([centroids[l] for l in labels])
+    dist = 1 - cosine_similarity(mat)
+    np.fill_diagonal(dist, 0)
+    dist = (dist + dist.T) / 2
+    return linkage(squareform(dist, checks=False), method="ward")
 
 
 def domain_human_distances(
@@ -76,14 +106,42 @@ def domain_human_distances(
 ) -> pd.DataFrame:
     """Per-domain distance from each LLM centroid to the human centroid (RQ2).
 
-    For each domain compute human centroid within that domain, then each LLM's
-    distance to it. Report mean and std of these domain-wise distances per LLM
-    -> which LLMs are closest to human writing, and how stable that is.
-
-    TODO: loop config.DOMAINS; within-domain centroids; distance (cosine or L2);
-    aggregate to (llm, mean_distance, std_distance).
+    For each domain, compute the human centroid within that domain, then each
+    LLM's cosine distance to it. Report mean and std of these domain-wise
+    distances per LLM -> which LLMs are closest to human writing, and how
+    stable that is across domains. Sorted ascending (closest to human first).
     """
-    raise NotImplementedError
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    labels = labels or [c for c in config.CLASSES if c != config.HUMAN_CLASS]
+    domain_vals = df[config.DOMAIN_COL].to_numpy()
+    label_vals = df[config.LABEL_COL].to_numpy()
+
+    distances = {label: [] for label in labels}
+    for dom in config.DOMAINS:
+        dom_mask = domain_vals == dom
+        human_mask = dom_mask & (label_vals == config.HUMAN_CLASS)
+        if not human_mask.any():
+            continue
+        human_centroid = embeddings[human_mask].mean(axis=0, keepdims=True)
+        for label in labels:
+            llm_mask = dom_mask & (label_vals == label)
+            if not llm_mask.any():
+                continue
+            llm_centroid = embeddings[llm_mask].mean(axis=0, keepdims=True)
+            sim = cosine_similarity(llm_centroid, human_centroid)[0, 0]
+            distances[label].append(1 - sim)
+
+    out = pd.DataFrame({
+        label: {
+            "mean_distance": np.mean(d) if d else float("nan"),
+            "std_distance": np.std(d) if d else float("nan"),
+            "n_domains": len(d),
+        }
+        for label, d in distances.items()
+    }).T
+    out.index.name = "model"
+    return out.sort_values("mean_distance")
 
 
 # --------------------------------------------------------------------------- #
@@ -92,11 +150,34 @@ def domain_human_distances(
 def run_per_domain(df, splits, feature_blocks, clf_name: str = "logreg") -> pd.DataFrame:
     """Re-run core classification separately for each of the 8 domains (RQ4).
 
-    For each domain: restrict train/eval to that domain's rows, call
-    modeling.train_and_evaluate, collect per-class F1 / confusion / feature
-    importance. Return a tidy DataFrame keyed by (domain, class).
-
-    TODO: import modeling.train_and_evaluate; slice by df[DOMAIN_COL]==domain
-    intersected with each split index; aggregate results.
+    Assembles all blocks in `feature_blocks` once (same dict shape as
+    `features.EXPERIMENTS['exp6_all']`'s inputs), then for each domain
+    restricts train/val to that domain's rows (intersected with the global
+    split, so no leakage) and trains+evaluates from scratch. Returns a tidy
+    DataFrame keyed by (domain, class) with per-class precision/recall/f1 plus
+    that domain's overall macro_f1 for convenience.
     """
-    raise NotImplementedError
+    from . import features as _features
+    from . import modeling as _modeling
+
+    y = df[config.LABEL_COL].to_numpy()
+    domain_vals = df[config.DOMAIN_COL].to_numpy()
+    which = [k for k in feature_blocks if k != "length"]
+    X = _features.assemble(feature_blocks, which)
+
+    train_pos = np.asarray(splits["train"])
+    val_pos = np.asarray(splits["val"])
+
+    rows = []
+    for dom in config.DOMAINS:
+        dom_mask = domain_vals == dom
+        tr_idx = train_pos[dom_mask[train_pos]]
+        val_idx = val_pos[dom_mask[val_pos]]
+        if len(tr_idx) == 0 or len(val_idx) == 0:
+            continue
+        res = _modeling.train_and_evaluate(
+            clf_name, X[tr_idx], y[tr_idx], X[val_idx], y[val_idx], labels=list(config.CLASSES)
+        )
+        for cls, metrics in res.per_class.items():
+            rows.append({"domain": dom, "class": cls, "macro_f1_domain": res.macro_f1, **metrics})
+    return pd.DataFrame(rows)
