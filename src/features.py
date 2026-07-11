@@ -33,7 +33,10 @@ def build_tfidf(texts_train: pd.Series, texts_all: pd.Series) -> Tuple[sp.csr_ma
     """
     from sklearn.feature_extraction.text import TfidfVectorizer
 
-    vec = TfidfVectorizer(**config.TFIDF_PARAMS)
+    # float32: sklearn defaults to float64, which doubles this matrix's memory
+    # for no accuracy benefit, and (worse) upcasts every other block to
+    # float64 too once assemble() hstacks them together -- see assemble().
+    vec = TfidfVectorizer(**config.TFIDF_PARAMS, dtype=np.float32)
     vec.fit(texts_train)
     X_all = vec.transform(texts_all)
     return X_all, vec
@@ -206,10 +209,12 @@ def scale_dense(X: np.ndarray, train_idx: np.ndarray) -> Tuple[np.ndarray, objec
     """
     from sklearn.preprocessing import StandardScaler
 
-    X = np.asarray(X, dtype=float)
+    # float32, not float64 (np.asarray's default via `dtype=float`) -- keeps
+    # this block from upcasting the whole assembled matrix in assemble().
+    X = np.asarray(X, dtype=np.float32)
     scaler = StandardScaler()
     scaler.fit(X[train_idx])
-    return scaler.transform(X), scaler
+    return scaler.transform(X).astype(np.float32), scaler
 
 
 # --------------------------------------------------------------------------- #
@@ -249,6 +254,13 @@ def assemble(blocks: Dict[str, object], which: list, add_length: bool = True):
 
     has_sparse = any(sp.issparse(p) for p in parts)
     if has_sparse:
-        parts = [p if sp.issparse(p) else sp.csr_matrix(np.asarray(p)) for p in parts]
+        # scipy.sparse.hstack upcasts EVERY part to the widest dtype among
+        # them -- one stray float64 block (e.g. the "length" column, which
+        # nobody thinks to cast) silently doubles the whole assembled matrix.
+        # Force float32 everywhere so hstack has nothing to upcast to.
+        parts = [
+            p.astype(np.float32) if sp.issparse(p) else sp.csr_matrix(np.asarray(p, dtype=np.float32))
+            for p in parts
+        ]
         return sp.hstack(parts, format="csr")
     return np.hstack([np.asarray(p) for p in parts])

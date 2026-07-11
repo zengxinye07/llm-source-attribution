@@ -24,8 +24,15 @@ def get_classifier(name: str):
                   features; do NOT call it on scaled/dense blocks)
 
     Note: modern sklearn LogisticRegression handles multinomial natively with
-    'lbfgs'/'saga', so no multi_class arg is needed. For large sparse TF-IDF,
-    switch solver to 'saga' if lbfgs is slow to converge.
+    'lbfgs'/'saga', so no multi_class arg is needed. 'saga' instead of the
+    default 'lbfgs': lbfgs approximates a dense Hessian, which is a poor fit
+    for the 50k-dim sparse TF-IDF conditions (exp1/4/6) -- it was measured
+    taking 90+ minutes per fit there without even converging. saga is
+    sklearn's documented recommendation for large sparse problems and is fast
+    on the small dense blocks too. LinearSVC gets dual="auto" for the same
+    reason: sklearn picks the primal formulation when n_samples > n_features
+    (true for every condition here), which converges far faster than the
+    liblinear default that was timing out.
     """
     from sklearn.linear_model import LogisticRegression
     from sklearn.svm import LinearSVC
@@ -33,10 +40,10 @@ def get_classifier(name: str):
 
     if name == "logreg":
         return LogisticRegression(
-            solver="lbfgs", C=1.0, max_iter=1000, random_state=config.RANDOM_STATE
+            solver="saga", C=1.0, max_iter=1000, random_state=config.RANDOM_STATE
         )
     if name == "svm":
-        return LinearSVC(C=1.0, random_state=config.RANDOM_STATE)
+        return LinearSVC(C=1.0, dual="auto", max_iter=5000, random_state=config.RANDOM_STATE)
     if name == "nb":
         return MultinomialNB()
     raise ValueError(f"unknown classifier: {name!r}")
