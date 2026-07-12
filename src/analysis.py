@@ -163,7 +163,7 @@ def run_per_domain(df, splits, feature_blocks, clf_name: str = "logreg") -> pd.D
     y = df[config.LABEL_COL].to_numpy()
     domain_vals = df[config.DOMAIN_COL].to_numpy()
     which = [k for k in feature_blocks if k != "length"]
-    X = _features.assemble(feature_blocks, which)
+    X = _features.assemble(feature_blocks, which, splits["train"])
 
     train_pos = np.asarray(splits["train"])
     val_pos = np.asarray(splits["val"])

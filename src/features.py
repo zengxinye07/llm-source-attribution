@@ -231,12 +231,22 @@ EXPERIMENTS = {
 }
 
 
-def assemble(blocks: Dict[str, object], which: list, add_length: bool = True):
+def assemble(blocks: Dict[str, object], which: list, train_idx: np.ndarray, add_length: bool = True):
     """Horizontally stack the requested feature blocks into one design matrix.
 
-    KEY GOTCHA: TF-IDF is sparse, the rest are dense. If TF-IDF is included the
-    result must be sparse -- use scipy.sparse.hstack and keep the whole matrix
-    sparse. Only the dense blocks get scaled (done upstream in scale_dense).
+    KEY GOTCHA #1: TF-IDF is sparse, the rest are dense. If TF-IDF is included
+    the result must be sparse -- use scipy.sparse.hstack and keep the whole
+    matrix sparse.
+
+    KEY GOTCHA #2: per-block scaling (scale_dense on stylometric/biber) is not
+    enough -- TF-IDF's row-L2-normalized values (typically ~0.05-0.3) and the
+    standardized dense blocks (~unit variance, so often -3..3) sit on wildly
+    different scales when concatenated. Under L2-regularized logreg/SVM this
+    is a conditioning problem, not just a cosmetic one: it was observed to
+    stop saga from converging within budget, tanking Macro-F1 by ~0.3 on the
+    combined conditions (exp4/6) even though every individual block carries
+    real signal. Fix: one more StandardScaler pass on the ASSEMBLED matrix
+    (with_mean=False when sparse, to keep it sparse), fit on train rows only.
 
     Parameters
     ----------
@@ -245,9 +255,14 @@ def assemble(blocks: Dict[str, object], which: list, add_length: bool = True):
         "biber", "sbert" (dense), plus "length" (dense, single column).
     which : list
         Subset of block names for this experiment (see EXPERIMENTS).
+    train_idx : array
+        Row positions of the training split -- the harmonizing scaler above
+        is fit on these only, same leakage rule as everywhere else.
     add_length : bool
         Append the log_token_count covariate (proposal 3.1 says all conditions).
     """
+    from sklearn.preprocessing import StandardScaler
+
     parts = [blocks[name] for name in which]
     if add_length:
         parts.append(blocks["length"])
@@ -262,5 +277,11 @@ def assemble(blocks: Dict[str, object], which: list, add_length: bool = True):
             p.astype(np.float32) if sp.issparse(p) else sp.csr_matrix(np.asarray(p, dtype=np.float32))
             for p in parts
         ]
-        return sp.hstack(parts, format="csr")
-    return np.hstack([np.asarray(p) for p in parts])
+        X = sp.hstack(parts, format="csr")
+    else:
+        X = np.hstack([np.asarray(p, dtype=np.float32) for p in parts])
+
+    scaler = StandardScaler(with_mean=not has_sparse)
+    scaler.fit(X[train_idx])
+    X = scaler.transform(X)
+    return X.astype(np.float32).tocsr() if has_sparse else X.astype(np.float32)
