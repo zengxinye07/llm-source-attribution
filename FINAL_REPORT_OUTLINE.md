@@ -1,0 +1,194 @@
+# Final Report Outline
+
+IMRAD structure, 2500 words / 5 pages max (references excluded from count, no
+appendix allowed). Standalone document — don't assume the reader has seen the
+detailed proposal.
+
+**Status: `08_test_evaluation.ipynb` and `09_interpretability.ipynb` have both
+run.** All numbers below are real, not placeholders — ready to write from.
+
+---
+
+## Introduction (~300 words)
+
+Restate the problem and motivation compactly — this is a standalone report,
+not an appendix to the proposal, so it needs its own short setup, but it can
+be a tight compression of the proposal's Introduction, not a rewrite from
+scratch.
+
+- Multi-class source attribution (human + 11 LLMs) vs. binary detection —
+  why the finer-grained question matters (academic integrity, platform
+  moderation, compliance).
+- RAID dataset, four research questions (RQ1–RQ4).
+- Consider previewing the headline result in the last sentence: 12-way
+  attribution reaches 0.772 Macro-F1 on held-out test data, a 0.128-point
+  gap below binary detection (0.901) — gives the reader the payoff up front.
+
+**Source**: proposal's Introduction section — compress, don't re-derive.
+
+## Background (if space allows — proposal's §2 can likely be cut to 1-2
+sentences given the 2500-word budget; this report is judged on the
+*implementation and results*, not a second literature review)
+
+## Methods (~750–900 words)
+
+**Data** (source: `00_data_and_split.ipynb`, `README.md`)
+- RAID `train_none.csv` — and *why* not the full dump: `test_none.csv` is
+  RAID's hidden-label leaderboard split (`id, generation` only, no `model`
+  column), unusable for supervised evaluation; `extra_none.csv` unused.
+  Worth a sentence — it's a concrete data-handling decision, not a proposal
+  assumption.
+- Preprocessing filters: `attack=="none"`, `decoding=="greedy" &
+  repetition_penalty=="no"` (human rows exempted), dedup, `MIN_TOKENS=3`
+  floor, `log_token_count` covariate. Matches proposal 3.1.
+- Actual final size: **159,288 rows**, 12 classes ranging 13,204–13,363 each
+  — report the real number, not the proposal's 160,452/13,371 estimate.
+
+**Splitting** (source: `00_data_and_split.ipynb`, README "The one rule")
+- Grouped by `source_id` (prompt-leakage control), 70/15/15, stratified on
+  **(model, domain) jointly** — worth explaining *why* domain stratification
+  specifically: every `source_id` group already contains exactly one row per
+  class by construction, so class balance across splits is automatic; domain
+  is what actually varies group-to-group and needed active stratification
+  for RQ4's per-domain analysis to be meaningful. This is a genuine
+  refinement over a naive reading of proposal 3.3.1, worth stating as a
+  design decision.
+- **Test set held out completely** until `08_test_evaluation` — val was used
+  for every condition comparison in the ablation study; test was touched
+  exactly once, for the final reported numbers.
+
+**Features** (source: `02_features.ipynb`, `src/features.py`)
+- TF-IDF (uni+bigrams, `max_features=50000`, sublinear TF).
+- Stylometric: avg sentence/word length, TTR, MTLD (length-robust lexical
+  diversity), 4 punctuation ratios.
+- Biber-inspired: 14 POS-tag distribution features, modal/passive/
+  nominalisation/discourse-marker ratios.
+- SBERT (`all-MiniLM-L6-v2`, normalized).
+
+**Classifiers & a methods note worth including** (source: `src/modeling.py`,
+`src/features.py::assemble`)
+- logreg (saga solver — primary, per proposal), LinearSVC, MultinomialNB
+  (TF-IDF-only, non-negativity).
+- **One real methodological finding worth a short paragraph**: naively
+  concatenating sparse TF-IDF (~0.05–0.3 range) with standardized dense
+  blocks (~unit variance) creates a magnitude mismatch that destabilizes
+  L2-regularized optimization — measured as saga failing to converge
+  within budget on the combined conditions, degrading Macro-F1 by ~0.3
+  despite every block carrying real signal individually. Fixed by scaling
+  each block by a single RMS scalar (not per-feature — per-feature
+  correction was tried first and made it far worse, inflating rare TF-IDF
+  terms ~100×). Two or three sentences; don't narrate the debugging, just
+  state problem → fix → why the naive fix (per-feature) was wrong.
+
+**Experimental design** (source: notebook structure itself, one line each)
+- Six ablation conditions (Exp1–6), detection-vs-attribution baseline,
+  confusion-based error analysis + clustering, SBERT centroid similarity +
+  domain-human-distance, domain-stratified re-training, held-out test
+  evaluation, per-block coefficient/feature-mean profiling. Directly maps to
+  proposal 3.3.2–3.3.7 — say so explicitly, it's evidence you executed the
+  proposed design in full, including the interpretability piece proposal
+  3.3.2 calls for.
+
+## Results (~750–900 words — figures carry most of the weight here, keep prose tight)
+
+Pick ~5 figures total; there isn't room for all thirteen. Suggested set:
+
+1. **RQ1 — ablation** (`figures/ablation_macro_f1.png`, from `03_ablation`):
+   Exp1=0.745 → Exp4=0.775 → Exp6=0.777 (logreg, val). One sentence on the
+   detection-vs-attribution gap can ride alongside this without its own
+   figure if space is tight.
+2. **RQ3 — confusion structure** (`figures/confusion_dendrogram.png` or
+   `confusion_matrix_heatmap.png`, from `05_error_analysis`): within/cross
+   family means (0.022 vs 0.020).
+3. **RQ2 — human-likeness ranking** (`figures/domain_human_distance.png`,
+   from `06_embedding`): this one figure answers most of RQ2 on its own.
+4. **RQ4 — domain difficulty** (`figures/per_domain_macro_f1.png`, from
+   `07_domain`): more space-efficient than the full per-class heatmap.
+5. **RQ2/RQ3 mechanism** (`figures/class_feature_means_heatmap.png`, from
+   `09_interpretability`): the gpt2/mistral/mpt stylometric signature table
+   below is probably more space-efficient than the full heatmap if page
+   count is tight — a compact table beats a 12×26 heatmap for this specific
+   point.
+
+**Final (test-set) headline numbers** — report these as *the* result, not the
+val numbers used for condition comparison:
+
+| | Binary | 12-way | Gap |
+|---|---|---|---|
+| Val (used for model selection) | 0.9042 | 0.7769 | 0.1274 |
+| **Test (final, held out)** | **0.9006** | **0.7724** | **0.1281** |
+
+The <0.005 val→test delta on every number is itself worth a sentence — it's
+evidence the ablation study's condition comparisons on val generalize and
+weren't overfit to validation.
+
+**Stylometric signature behind the base-model cluster** (from `09`, worth a
+compact table rather than the full heatmap given space):
+
+| | avg_sentence_len | ttr | passive_ratio | discourse_marker_ratio |
+|---|---|---|---|---|
+| gpt2 / mistral / mpt | 47.6–77.1 | 0.09–0.22 | 0.027–0.031 | ~0.000 |
+| everyone else (range) | 18–27 | 0.52–0.61 | 0.013–0.022 | 0.001–0.003 |
+
+Report exact numbers in text even where a figure is cut for space —
+reviewers weight "correctness and thoroughness of experimental work" (6
+marks) independent of whether every chart made it into 5 pages.
+
+## Discussion (~600–750 words)
+
+One paragraph per RQ, compressing what's already written at the bottom of
+each notebook:
+
+- **RQ1**: Lexical (TF-IDF) dominates throughout; style adds a real but
+  modest increment (+0.03); SBERT is redundant once lexical+style are
+  present. **This contradicts the proposal's stated hypothesis** ("style
+  will prove more discriminative than lexical") — say so plainly. `09`
+  provides concrete, quotable evidence for *why*: several classes' top
+  TF-IDF coefficients are recognizably domain artifacts, not style (e.g.
+  `mistral-chat`'s top words include "sure here", "hey fellow", "redditors"
+  — Reddit-domain chatbot-opener phrasing; `mpt`'s include "the recipe",
+  "white sugar" — recipe-domain), directly illustrating the proposal's own
+  caveat that lexical features "may partly reflect prompt wording or topic
+  overlap."
+- **RQ3**: Aggregate within/cross-family confusion is flat (0.022 vs 0.020),
+  but confusion clustering and embedding clustering (two independent
+  methods) both split models along **base vs. chat-tuned** status, not
+  organizational lineage — Cohere is the one family where lineage also
+  predicts confusion. `09` supplies the *mechanism*: gpt2/mistral/mpt have a
+  measurably distinct stylometric signature (2–4× longer "sentences",
+  2.5–6× lower lexical diversity, more passive voice, ~zero discourse
+  markers) consistent with non-instruction-tuned generation rambling without
+  natural stopping points — this is the concrete writing-style difference
+  underlying the abstract clustering results.
+- **RQ2**: Cohere is the most human-like model by three independent
+  measures (confusion clustering, embedding distance, domain-stratified
+  distance); gpt2 is both least human-like *and* least consistently so
+  across domains. Chat-tuning measurably closes the gap to human writing
+  within every family that has both variants. Also worth a line: human
+  writing is distinctly high in adverb use (`pos_adv`) relative to every
+  LLM — one of the few features where humans, not any model, are the
+  outlier.
+- **RQ4**: Domain difficulty spans 0.69–0.94 Macro-F1 (val; final test
+  numbers not re-run per domain, note as scope limit if asked). **Contradicts
+  one specific proposal prediction**: Reddit (informal) was expected to be
+  *easier* to attribute, turned out to be the *hardest* domain; recipes
+  (rigidly structured) was expected to suppress stylometric signal, turned
+  out easiest — likely because rigid structure strips away topic variation
+  and leaves only source-specific formatting/phrasing choices.
+- **Limitations**: saga not fully converging within `max_iter=1000` on
+  several conditions (computational constraint, noted throughout via
+  `ConvergenceWarning` — results are stable and sane despite this, but not
+  provably optimal); TF-IDF/prompt-leakage confound (flagged above, not
+  fully disentangled — would need a leakage-controlled re-run, e.g. TF-IDF
+  fit per-domain, to isolate); domain-stratified analysis (`07`) and
+  interpretability (`09`) were run on val, not re-verified on test, given
+  the 17 July deadline — reasonable scope cut, not a hidden gap.
+
+---
+
+## Word/section budget check
+
+Intro 300 + Methods 850 + Results 800 + Discussion 650 ≈ 2600 words before
+trimming — expect to cut ~100 words from Methods (the assemble-scaling
+paragraph and the splitting-rationale paragraph are the two most compressible
+if over budget) to land under 2500.
