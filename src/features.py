@@ -241,12 +241,17 @@ def assemble(blocks: Dict[str, object], which: list, train_idx: np.ndarray, add_
     KEY GOTCHA #2: per-block scaling (scale_dense on stylometric/biber) is not
     enough -- TF-IDF's row-L2-normalized values (typically ~0.05-0.3) and the
     standardized dense blocks (~unit variance, so often -3..3) sit on wildly
-    different scales when concatenated. Under L2-regularized logreg/SVM this
-    is a conditioning problem, not just a cosmetic one: it was observed to
-    stop saga from converging within budget, tanking Macro-F1 by ~0.3 on the
-    combined conditions (exp4/6) even though every individual block carries
-    real signal. Fix: one more StandardScaler pass on the ASSEMBLED matrix
-    (with_mean=False when sparse, to keep it sparse), fit on train rows only.
+    different scales when concatenated, which is a real conditioning problem
+    for L2-regularized logreg/SVM. FIRST FIX ATTEMPT (per-FEATURE
+    StandardScaler on the assembled matrix) made this much worse, not
+    better: TF-IDF has 50k mostly-rare columns, each nonzero in only a
+    handful of the 113k training rows, so their column std is tiny --
+    dividing by it inflated entries to mean~12/max~337 (should be ~0.05-0.3),
+    which wrecked saga's magnitude-dependent step-size heuristic and turned a
+    36-minute fit into one that didn't converge in 10 hours. Fix: scale each
+    BLOCK by one scalar (its RMS on train), not each feature independently --
+    this equalizes overall block magnitude without distorting any single
+    feature's weight relative to its own block.
 
     Parameters
     ----------
@@ -256,16 +261,25 @@ def assemble(blocks: Dict[str, object], which: list, train_idx: np.ndarray, add_
     which : list
         Subset of block names for this experiment (see EXPERIMENTS).
     train_idx : array
-        Row positions of the training split -- the harmonizing scaler above
-        is fit on these only, same leakage rule as everywhere else.
+        Row positions of the training split -- each block's RMS scale factor
+        is computed on these only, same leakage rule as everywhere else.
     add_length : bool
         Append the log_token_count covariate (proposal 3.1 says all conditions).
     """
-    from sklearn.preprocessing import StandardScaler
+    def _block_rms(p) -> float:
+        train_slice = p[train_idx]
+        vals = train_slice.data if sp.issparse(train_slice) else np.asarray(train_slice).ravel()
+        vals = vals[vals != 0]
+        if vals.size == 0:
+            return 1.0
+        rms = float(np.sqrt(np.mean(np.square(vals, dtype=np.float64))))
+        return rms if rms > 1e-12 else 1.0
 
-    parts = [blocks[name] for name in which]
+    raw_parts = [blocks[name] for name in which]
     if add_length:
-        parts.append(blocks["length"])
+        raw_parts.append(blocks["length"])
+
+    parts = [p / _block_rms(p) for p in raw_parts]
 
     has_sparse = any(sp.issparse(p) for p in parts)
     if has_sparse:
@@ -277,11 +291,5 @@ def assemble(blocks: Dict[str, object], which: list, train_idx: np.ndarray, add_
             p.astype(np.float32) if sp.issparse(p) else sp.csr_matrix(np.asarray(p, dtype=np.float32))
             for p in parts
         ]
-        X = sp.hstack(parts, format="csr")
-    else:
-        X = np.hstack([np.asarray(p, dtype=np.float32) for p in parts])
-
-    scaler = StandardScaler(with_mean=not has_sparse)
-    scaler.fit(X[train_idx])
-    X = scaler.transform(X)
-    return X.astype(np.float32).tocsr() if has_sparse else X.astype(np.float32)
+        return sp.hstack(parts, format="csr")
+    return np.hstack([np.asarray(p, dtype=np.float32) for p in parts])
