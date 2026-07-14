@@ -3,8 +3,12 @@
 Multi-class source attribution on the RAID dataset (12 classes: human + 11 LLMs).
 `src/` holds the stable, reusable logic; `notebooks/` runs the experiments and
 produces every report figure/table; `FINAL_REPORT_OUTLINE.md` is the section-by-
-section writing plan for the final report. See the group's detailed proposal PDF
-for the full research questions (RQ1–RQ4) and methodology this code implements.
+section writing plan for the final report. Three research questions after
+merging RQ2/RQ3 per supervisor feedback on the detailed proposal (RQ3's
+confusion/lineage question was a natural output of investigating RQ2, not a
+separate one) — see `FINAL_REPORT_OUTLINE.md` for the exact wording, and the
+group's detailed proposal PDF for the original methodology this code
+implements.
 
 ## Status: all experiments done, writing the final report
 
@@ -48,7 +52,7 @@ scratch if you ever need to regenerate them (e.g. after a preprocessing change).
 **(model, domain) jointly**, not model alone. Every `source_id` group already
 contains exactly one row per class, so class balance across folds is guaranteed
 by construction regardless of split assignment — domain is the thing that
-actually varies group-to-group, and RQ4's domain-stratified analysis (3.3.7)
+actually varies group-to-group, and RQ3's domain-stratified analysis (3.3.7)
 needs each split to be domain-balanced too. Verified: every domain lands within
 ~0.1pp of the same share in train/val/test.
 
@@ -65,11 +69,11 @@ touched exactly once, for the numbers actually reported as final.
 | 2 | `02_features` | 3.2 | stylometric / SBERT / Biber implementations (cached) + sanity check |
 | 3 | `03_ablation` | 3.3.3 | Exp 1–6 metrics table (val) → **RQ1** |
 | 4 | `04_detection_baseline` | 3.3.4 | binary vs 12-way gap (val) → **RQ1** |
-| 5 | `05_error_analysis` | 3.3.5 | confusion + family clustering → **RQ3** |
-| 6 | `06_embedding` | 3.3.6 | centroid similarity + domain-human distances → **RQ2/RQ3** |
-| 7 | `07_domain` | 3.3.7 | per-domain re-runs → **RQ4** |
+| 5 | `05_error_analysis` | 3.3.5 | confusion + family clustering → **RQ2** |
+| 6 | `06_embedding` | 3.3.6 | centroid similarity + domain-human distances → **RQ2** |
+| 7 | `07_domain` | 3.3.7 | per-domain re-runs → **RQ3** |
 | 8 | `08_test_evaluation` | 3.3.1 | held-out test evaluation → **RQ1 headline numbers** |
-| 9 | `09_interpretability` | 3.2, 3.3.2 | logreg coefficients + class-level feature means → **RQ1/RQ2/RQ3 mechanism** |
+| 9 | `09_interpretability` | 3.2, 3.3.2 | logreg coefficients + class-level feature means → **RQ1/RQ2 mechanism** |
 
 Work notebooks 0→1→2 in order (serial dependency: everything downstream reads
 `00`'s cached clean df, and `02` is what first computes and caches the SBERT
