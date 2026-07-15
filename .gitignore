@@ -13,3 +13,6 @@ artifacts/*.json
 
 # ignores
 .DS_Store
+
+# local-only report drafts, not for GitHub
+RESULTS_FINAL.md

@@ -151,10 +151,16 @@ weren't overfit to validation.
 **Stylometric signature behind the base-model cluster** (from `09`, worth a
 compact table rather than the full heatmap given space):
 
-| | avg_sentence_len | ttr | passive_ratio | discourse_marker_ratio |
+| | % docs read as one sentence | ttr | passive_ratio | discourse_marker_ratio |
 |---|---|---|---|---|
-| gpt2 / mistral / mpt | 47.6–77.1 | 0.09–0.22 | 0.027–0.031 | ~0.000 |
-| everyone else (range) | 18–27 | 0.52–0.61 | 0.013–0.022 | 0.001–0.003 |
+| gpt2 / mistral / mpt | 11.3–22.0% | 0.09–0.22 | 0.027–0.031 | ~0.000 |
+| everyone else (range) | 0.0–7.0% | 0.52–0.61 | 0.013–0.022 | 0.001–0.003 |
+
+(Originally used avg_sentence_len here — 47.6–77.1 vs 18–27 — but that's a
+mean-skew artifact: median sentence length is 19–21 words for gpt2/mistral/mpt,
+indistinguishable from everyone else. The mean gets dragged up by a subset of
+documents with no detectable sentence boundary at all, which is what the %
+column above measures directly. See `09`'s "Robustness check" cell.)
 
 Report exact numbers in text even where a figure is cut for space —
 reviewers weight "correctness and thoroughness of experimental work" (6
@@ -190,9 +196,12 @@ does:
   independent methods — both split models along **base vs. chat-tuned**
   status instead, with Cohere as the one family where lineage also predicts
   confusion. `09` supplies the mechanism behind all of this: gpt2/mistral/mpt
-  have a measurably distinct stylometric signature (2–4× longer "sentences,"
-  2.5–6× lower lexical diversity, more passive voice, ~zero discourse
-  markers) consistent with non-instruction-tuned generation rambling without
+  have a measurably distinct stylometric signature (11–22% of documents with
+  no detectable sentence boundary vs. 0–7% elsewhere, not "longer sentences"
+  — the mean sentence-length gap turned out to be a skew artifact, caught by
+  a robustness check; median sentence length doesn't distinguish these
+  classes at all), 2.5–6× lower lexical diversity, more passive voice, ~zero
+  discourse markers, consistent with non-instruction-tuned generation rambling without
   natural stopping points — the concrete writing-style difference underlying
   both the human-likeness ranking and the clustering results. Also worth a
   line: human writing is distinctly high in adverb use (`pos_adv`) relative
